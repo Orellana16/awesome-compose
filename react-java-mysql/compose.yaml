@@ -1,58 +1,56 @@
 services:
-  backend:
-    build: backend
-    restart: always
-    secrets:
-      - db-password
+  # 1. Base de Datos (Red Privada)
+  db:
+    image: mysql:8.0
     environment:
-      MYSQL_HOST: db
+      # Asegúrate de que el nombre a la izquierda sea EXACTAMENTE este:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: exampledb
+      MYSQL_USER: app_user
+      MYSQL_PASSWORD: ${DB_PASSWORD}
     networks:
-      - react-spring
-      - spring-mysql
+      - backend-db
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  # 2. Backend (Red Pública y Privada)
+  backend:
+    build: ./backend
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/exampledb
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
     depends_on:
       db:
         condition: service_healthy
-  db:
-    # We use a mariadb image which supports both amd64 & arm64 architecture
-    image: mariadb:10.6.4-focal
-    # If you really want to use MySQL, uncomment the following line
-    #image: mysql:8.0.19
-    environment:
-      - MYSQL_DATABASE=example
-      - MYSQL_ROOT_PASSWORD_FILE=/run/secrets/db-password
+    networks:
+      - proxy-backend
+      - backend-db
     restart: always
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
-      interval: 3s
-      retries: 5
-      start_period: 30s
-    secrets:
-      - db-password
-    volumes:
-      - db-data:/var/lib/mysql
-    networks:
-      - spring-mysql
+
+  # 3. Frontend (Red Pública)
   frontend:
-    build:
-      context: frontend
-      target: development
-    ports:
-      - 3000:3000
-    volumes:
-      - ./frontend/src:/code/src
-      - /project/node_modules
+    build: ./frontend
     networks:
-      - react-spring
+      - frontend-proxy
+
+  # 4. Reverse Proxy (El único expuesto)
+  proxy:
+    image: nginx:1.25-alpine
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "80:80"
     depends_on:
+      - frontend
       - backend
-    expose:
-      - 3306
-      - 33060
-volumes:
-  db-data: {}
-secrets:
-  db-password:
-    file: db/password.txt
+    networks:
+      - frontend-proxy
+      - proxy-backend
+
 networks:
-  react-spring: {}
-  spring-mysql: {}
+  frontend-proxy:
+  proxy-backend:
+  backend-db:
+
+volumes:
+  mysql_data:

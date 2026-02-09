@@ -1,38 +1,24 @@
-# syntax=docker/dockerfile:1.4
+# --- STAGE 1: Build ---
+# Usamos una versión específica de Node para control de versiones
+FROM node:18-alpine AS build
+WORKDIR /app
 
-FROM --platform=$BUILDPLATFORM node:lts AS development
+# Instalamos dependencias
+COPY package*.json ./
+RUN npm install
 
-WORKDIR /code
-COPY package.json /code/package.json
-COPY package-lock.json /code/package-lock.json
+# Copiamos código y compilamos para producción
+COPY . .
+RUN npm run build
 
-RUN npm ci
-COPY . /code
+# --- STAGE 2: Runtime ---
+# Usamos una imagen ligera de Nginx para servir los archivos estáticos
+FROM nginx:1.25-alpine
 
-ENV CI=true
-ENV PORT=3000
+# Copiamos los archivos compilados desde la etapa anterior
+COPY --from=build /app/build /usr/share/nginx/html
 
-CMD [ "npm", "start" ]
+# Exponemos el puerto interno (3000 o 80 según tu preferencia)
+EXPOSE 80
 
-FROM development AS dev-envs
-RUN <<EOF
-apt-get update
-apt-get install -y git
-EOF
-
-RUN <<EOF
-useradd -s /bin/bash -m vscode
-groupadd docker
-usermod -aG docker vscode
-EOF
-# install Docker tools (cli, buildx, compose)
-COPY --from=gloursdocker/docker / /
-CMD [ "npm", "start" ]
-
-FROM development AS build
-
-RUN ["npm", "run", "build"]
-
-FROM nginx:1.13-alpine
-
-COPY --from=build /code/build /usr/share/nginx/html
+CMD ["nginx", "-g", "daemon off;"]
